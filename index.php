@@ -22,7 +22,7 @@ if($_SERVER['REQUEST_METHOD']=='POST'&&csrf_ok()){try{$a=$_POST['a']??'';
   $db->commit();}
  if($a=='pw'){need('admin');if(strlen($_POST['pw'])<8)throw new Exception('รหัสผ่านต้องยาวอย่างน้อย 8 ตัว');$db->prepare('UPDATE mc_users SET pass_hash=? WHERE id=?')->execute([password_hash($_POST['pw'],PASSWORD_DEFAULT),$_POST['id']]);}
  if($a=='topup'){need('admin');$db->prepare('UPDATE credits SET balance=balance+? WHERE student_id=?')->execute([(float)$_POST['n'],$_POST['sid']]);}
- if($a=='absence'){need('admin','student');$sid=$R=='student'?$SID:(int)($_POST['sid']??0);if(!$sid)throw new Exception('ยังไม่มีนักเรียน');
+ if($a=='absence'){need('admin','student');$sid=$R=='student'?$SID:(preg_match('/#(\d+)\)\s*$/',$_POST['sidtxt']??'',$m)?(int)$m[1]:0);if(!$sid)throw new Exception('กรุณาเลือกนักเรียนจากรายการที่ขึ้นให้');
   $c=$db->prepare('SELECT 1 FROM teacher_courses WHERE course=? LIMIT 1');$c->execute([$_POST['course']??'']);if(!$c->fetch())throw new Exception('ยังไม่มีครูประจำวิชานี้');
   $r=rule($_POST['course']);$ok=(strtotime($_POST['d'].' '.$_POST['tm'])-time())/3600>=$r['notice_hours'];
   $db->prepare("INSERT INTO absences(student_id,course,class_date,class_time,reason,eligible,note,status) VALUES(?,?,?,?,?,?,?,'pending')")->execute([$sid,$_POST['course'],$_POST['d'],$_POST['tm'],$_POST['reason'],$ok?'t':'f',$ok?'':'แจ้งล่วงหน้าไม่ถึง '.$r['notice_hours'].' ชม.']);}
@@ -55,13 +55,14 @@ echo '<span class="ml-auto text-sm">'.($R=='admin'?'ผู้ดูแลระ�
 if(!empty($_SESSION['m'])){echo '<div class="bg-amber-100 p-2 rounded mb-3">'.h($_SESSION['m']).'</div>';unset($_SESSION['m']);}
 $st=$R=='admin'?$db->query('SELECT s.id,s.name,c.balance FROM students s LEFT JOIN credits c ON c.student_id=s.id ORDER BY s.name')->fetchAll():[];
 $opts=implode('',array_map(fn($s)=>'<option value='.$s['id'].'>'.h($s['name']).'</option>',$st));
+$dl=implode('',array_map(fn($s)=>'<option value="'.h($s['name']).' (#'.$s['id'].')">',$st));
 $tch=$db->query("SELECT id,name FROM mc_users WHERE role='teacher' ORDER BY name")->fetchAll();
 $topts=implode('',array_map(fn($s)=>'<option value='.$s['id'].'>'.h($s['name']).'</option>',$tch));
 $courses=$db->query('SELECT DISTINCT course FROM teacher_courses ORDER BY course')->fetchAll(PDO::FETCH_COLUMN);
 $copts=implode('',array_map(fn($c)=>'<option value="'.h($c).'">'.h($c).'</option>',$courses));
 echo '<div class="bg-white p-4 rounded-xl shadow space-y-3">';
 if($p=='absences'){$SL=['pending'=>'⏳ รอครูอนุมัติ','open'=>'✔ อนุมัติแล้ว รอครูนัดวัน','booked'=>'📅 นัดวันชดเชยแล้ว','done'=>'เสร็จสิ้น','rejected'=>'❌ ไม่อนุมัติ'];
- if($R!='teacher')echo '<form method=post class="flex flex-wrap gap-2">'.$T.'<input type=hidden name=a value=absence>'.($R=='admin'?'<select name=sid class="'.$in.'">'.$opts.'</select>':'').'<select name=course required class="'.$in.'"><option value="">วิชา</option>'.$copts.'</select><input type=date name=d required class="'.$in.'"><input type=time name=tm required class="'.$in.'"><input name=reason placeholder="เหตุผล" class="'.$in.'"><button class="'.$bt.'">ยื่นใบลา</button></form>';
+ if($R!='teacher')echo '<form method=post class="flex flex-wrap gap-2">'.$T.'<input type=hidden name=a value=absence>'.($R=='admin'?'<input name=sidtxt list=stl required autocomplete=off placeholder="พิมพ์ค้นหานักเรียน" class="'.$in.'"><datalist id=stl>'.$dl.'</datalist>':'').'<select name=course required class="'.$in.'"><option value="">วิชา</option>'.$copts.'</select><input type=date name=d required class="'.$in.'"><input type=time name=tm required class="'.$in.'"><input name=reason placeholder="เหตุผล" class="'.$in.'"><button class="'.$bt.'">ยื่นใบลา</button></form>';
  echo '<table class="w-full text-sm"><tr class="text-left bg-slate-50"><th>นักเรียน</th><th>วิชา</th><th>วันที่ลา</th><th>เหตุผล</th><th>สถานะ</th>'.($R=='teacher'?'<th>อนุมัติ + นัดวันชดเชย</th>':'').'</tr>';
  $w=$R=='student'?'WHERE a.student_id='.$SID:($R=='teacher'?'WHERE a.course IN (SELECT course FROM teacher_courses WHERE teacher_id='.$ME.')':'');
  foreach($db->query("SELECT a.*,s.name FROM absences a JOIN students s ON s.id=a.student_id $w ORDER BY (a.status='pending') DESC,a.class_date DESC LIMIT 100") as $x){
